@@ -19,6 +19,27 @@ from movielens import ratings
 from random import randint
 from PorterStemmer import PorterStemmer
 
+
+""" TO-DO:
+
+- Deal with year included
+- Random same responses
+- Deal with not a movie
+- Deal with ,The
+- Deal with submitting same movie twice
+- Deal with n't regex
+- Deal with np.where()
+
+FEATURES:
+- alternate titles/foreign titles
+- arbitrary input
+- multiple movies
+- disambiguating movie titles for series
+- non binarized data
+- emotion detection
+- spellcheck (edit distance)
+- extreme like/dislike
+"""
 class Chatbot:
     """Simple class to implement the chatbot for PA 6."""
 
@@ -36,6 +57,7 @@ class Chatbot:
       self.extremeWords = set(["very", "really", "extremely"])
       self.movies = {}
       self.movie_to_index_dict = {}
+      self.movie_scores = []
       self.read_data()
 
     #############################################################################
@@ -131,11 +153,21 @@ class Chatbot:
 
       if len(self.movies) == 5:
         print(response)
-        print("Recommending movie now")
+        self.movie_scores = self.recommend()
+        user_input = "Yes"
+        while user_input == "Yes":
+          print("I recommend "+self.get_top_recommendation())
+          user_input = raw_input("Do you want another recommendation?\n>")
         return ""
       else:
         response += "\nTell me about another movie you have seen."
         return response
+
+    def get_top_recommendation(self):
+      top_movie = np.argmax(self.movie_scores)
+      self.movie_scores[top_movie] = -sys.maxint-1
+      return self.get_movie_title(self.titles[top_movie][0])
+
 
     def get_sentence_sentiment(self, sentence):
       sentence = sentence.split()
@@ -179,11 +211,15 @@ class Chatbot:
       self.sentiment = dict(reader)
       self.stem_words()
       self.binarize()
-      print(self.titles)
+      self.make_movie_to_index_dict()
 
     def make_movie_to_index_dict(self):
-      for word_index in range(len(self.titles)):
-        movie_index = self.titles[word_index][0]
+      for movie_index in range(len(self.titles)):
+        movie_title = self.get_movie_title(self.titles[movie_index][0])
+        self.movie_to_index_dict[movie_title] = movie_index
+
+    def get_movie_title(self, movie_title_with_year):
+      return movie_title_with_year[0:len(movie_title_with_year)-7]
 
     def stem_words(self):
       new_sentiment = {}
@@ -206,17 +242,32 @@ class Chatbot:
       """Calculates a given distance function between vectors u and v"""
       # TODO: Implement the distance function between vectors u and v]
       # Note: you can also think of this as computing a similarity measure
-      return np.dot(u, v)/(np.linalg.norm(u)*np.linalg.norm(v))
+      dot_product = np.dot(u, v)
+      if dot_product == 0:
+        return 0
+      else:
+        return dot_product/(np.linalg.norm(u)*np.linalg.norm(v))
 
 
-    def recommend(self, u):
+    def recommend(self):
       """Generates a list of movies based on the input vector u using
       collaborative filtering"""
       # TODO: Implement a recommendation function that takes a user vector u
       # and outputs a list of movies recommended by the chatbot
-      # for user_movies in self.movies:
-      #   for movie_index in 
-      pass
+      movie_scores = []
+      for movie_index in range(len(self.ratings)):
+        score = 0
+        for user_movie in self.movies:
+          user_movie_index = self.movie_to_index_dict[user_movie]
+          score += self.distance(self.ratings[movie_index], self.ratings[user_movie_index])*self.movies[user_movie]
+        movie_scores.append(score)
+
+      movie_scores = np.array(movie_scores)
+
+      for user_movie in self.movies:
+        user_movie_index = self.movie_to_index_dict[user_movie]
+        movie_scores[user_movie_index] = -sys.maxint-1
+      return movie_scores
 
     def flagWords(self, words, mySet):
       currentWordIndex = 0
