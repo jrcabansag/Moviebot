@@ -12,6 +12,7 @@ import sys
 import getopt
 import os
 import operator
+import random
 
 import numpy as np
 
@@ -22,16 +23,8 @@ from PorterStemmer import PorterStemmer
 
 """ TO-DO:
 
-- Deal with year included
-- Random same responses
-- Deal with not a movie
-- Deal with ,The
-- Deal with submitting same movie twice
-- Deal with n't regex
-- Deal with np.where()
-
 FEATURES:
-- alternate titles/foreign titles
+- handle without year
 - arbitrary input
 - multiple movies
 - disambiguating movie titles for series
@@ -52,11 +45,12 @@ class Chatbot:
       self.p = PorterStemmer()
       self.punctuation = set([",", ".","?","!",":",'"',"'","(",")"])
       self.endPunctuation = set([".","?","!",":",'"',"'","(",")"])
-      self.negateWords = set(["not", "isn't", "ain't", "aren't", "didn't", "doesn't", "can't", "won't", "no", "never", "neither", "nor", "wasn't"])
+      self.negateWords = set(["not", "no", "never", "neither", "nor"])
       self.prevNegateWords = set(["but", "although", "however", "yet"])
       self.extremeWords = set(["very", "really", "extremely"])
       self.movies = {}
       self.movie_to_index_dict = {}
+      self.alternate_titles_dict = {}
       self.movie_scores = []
       self.read_data()
 
@@ -97,6 +91,18 @@ class Chatbot:
     # 2. Modules 2 and 3: extraction and transformation                         #
     #############################################################################
 
+    def handle_prefixes(self, movie_name, prefix_list):
+      for prefix_index in range(len(prefix_list)):
+        prefix = prefix_list[prefix_index]
+        if movie_name[0:len(prefix)+1] == prefix+" ":
+          movie_year = movie_name[len(movie_name)-7:]
+          movie_name = movie_name[len(prefix)+1:-7]+", "+prefix+movie_year
+          return movie_name
+      return movie_name
+
+    def remove_year(self, movie_title_with_year):
+      return movie_title_with_year[0:len(movie_title_with_year)-7]
+
     def extract_movie(self, input):
       movie_patt = '\"(.*?)\"'
       matches = re.findall(movie_patt, input)
@@ -111,6 +117,19 @@ class Chatbot:
         response = "You put a blank movie!"
       else:
         movie_name = matches[0]
+        movie_name = self.handle_prefixes(movie_name, ["The", "A", "La", "El"])
+        # if movie_name[0:3] == "The":
+        #   movie_year = movie_name[len(movie_name)-7:]
+        #   movie_name = movie_name[4:-7]+", The"+movie_year
+        if movie_name not in self.movie_to_index_dict:
+          if self.remove_year(movie_name) in self.alternate_titles_dict:
+            movie_name = self.alternate_titles_dict[self.remove_year(movie_name)]
+          else:
+            movie_name = ""
+            response = "That is not a valid movie!"
+        if movie_name in self.movies:
+          movie_name = ""
+          response = "You already talked about that movie! Tell me about other movies."
         processed_sentence = self.remove_movie(input)
 
 
@@ -119,6 +138,9 @@ class Chatbot:
     def remove_movie(self, input):
       input_array = input.split('"')
       return input_array[0]+input_array[-1]
+
+    def check_if_yes(self, input):
+      return input == "Yes"
 
     def process(self, input):
       """Takes the input string from the REPL and call delegated functions
@@ -133,34 +155,35 @@ class Chatbot:
       #############################################################################
 
       response = ""
-
-      if self.is_turbo == True:
-        pass
+      if len(self.movies) == 5:
+        if self.check_if_yes(input):
+          return "I recommend "+self.get_top_recommendation()+"\n Would you like to hear another recommendation? (Or enter :quit if you're done.)"
+        elif input == ":quit":
+          return ""
+        else:
+          return "Sorry, I don't understand, type Yes if you would like to hear another recommendation? (Or enter :quit if you're done.)"
       else:
         movie_name, response, processed_sentence = self.extract_movie(input)
         if movie_name == "":
           return response
-        else:
-          sentiment = self.get_sentence_sentiment(processed_sentence)
-          if sentiment != 0:
-            self.movies[movie_name] = sentiment
-            if sentiment == 1:
-              response = 'You liked "'+movie_name+'". Thank you!'
-            else:
-              response = 'You did not like "'+movie_name+'". Thank you!'
+        sentiment = self.get_sentence_sentiment(processed_sentence)
+        if sentiment != 0:
+          self.movies[movie_name] = sentiment
+          if sentiment == 1:
+            like_greeting_one = ["Glad to hear you liked "+movie_name, "Happy to hear you enjoyed "+movie_name, "You liked "+movie_name, movie_name+" sounds like a great movie"]
+            like_greeting_two = [". Thanks! ", ". Thank you! ", ". Neato! ", ". Sounds cool! "]
+            response = like_greeting_one[random.randrange(len(like_greeting_one))]+like_greeting_two[random.randrange(len(like_greeting_two))]
           else:
-            return "Sorry, I don't understand. Did you like or dislike this movie?"
-
-      if len(self.movies) == 5:
-        print(response)
-        self.movie_scores = self.recommend()
-        user_input = "Yes"
-        while user_input == "Yes":
-          print("I recommend "+self.get_top_recommendation())
-          user_input = raw_input("Do you want another recommendation?\n>")
-        return ""
-      else:
-        response += "\nTell me about another movie you have seen."
+            dislike_greeting_one = ["Sorry you didn't like "+movie_name, "You didn't like "+movie_name, "So you didn't enjoy "+movie_name, "So "+movie_name+" wasn't the best movie in your opinion"]
+            dislike_greeting_two = [". Thanks for letting me know! ", ". Thanks! ", ". I understand. ", ". Alright. "]
+            response = dislike_greeting_one[random.randrange(len(dislike_greeting_one))]+dislike_greeting_two[random.randrange(len(dislike_greeting_two))]
+          if len(self.movies) == 5:
+            self.movie_scores = self.recommend()
+            response += "I recommend "+self.get_top_recommendation()+"\n Would you like to hear another recommendation? (Or enter :quit if you're done.)"
+          else:
+            response += "\nTell me about another movie you have seen."
+        else:
+          return "Sorry, I don't understand: "+input+". Did you like or dislike this movie?"
         return response
 
     def get_top_recommendation(self):
@@ -173,7 +196,7 @@ class Chatbot:
       sentence = sentence.split()
       not_flags = self.flagWords(sentence, self.negateWords)
       not_prev_flags = self.flagWordsBackwards(sentence, self.prevNegateWords)
-      extreme_flags = self.flagWords(sentence, self.extremeWords)
+      #extreme_flags = self.flagWords(sentence, self.extremeWords)
       pos_count = 0
       neg_count = 0
       for word_index in range(len(sentence)):
@@ -207,11 +230,25 @@ class Chatbot:
       # The values stored in each row i and column j is the rating for
       # movie i by user j
       self.titles, self.ratings = ratings()
+      self.make_alternate_titles_dict()
       reader = csv.reader(open('data/sentiment.txt', 'rb'))
       self.sentiment = dict(reader)
       self.stem_words()
       self.binarize()
       self.make_movie_to_index_dict()
+
+    def make_alternate_titles_dict(self):
+      for movie_index in range(len(self.titles)):
+        movie_title = self.titles[movie_index][0]
+        movie_patt = '\((.*?)\)'
+        #print(movie_title)
+        matches = re.findall(movie_patt, movie_title)
+        #print(matches)
+        for match_index in range(len(matches)-1):
+          match = matches[match_index]
+          if match[0:6] == "a.k.a.":
+            match = match[7:]
+          self.alternate_titles_dict[match] = movie_title
 
     def make_movie_to_index_dict(self):
       for movie_index in range(len(self.titles)):
@@ -219,7 +256,7 @@ class Chatbot:
         self.movie_to_index_dict[movie_title] = movie_index
 
     def get_movie_title(self, movie_title_with_year):
-      return movie_title_with_year[0:len(movie_title_with_year)-7]
+      return movie_title_with_year
 
     def stem_words(self):
       new_sentiment = {}
@@ -229,14 +266,13 @@ class Chatbot:
 
     def binarize(self):
       """Modifies the ratings matrix to make all of the ratings binary"""
-      for movie_index in range(self.ratings.shape[0]):
-        for user_index in range(self.ratings.shape[1]):
-          rating = self.ratings[movie_index, user_index]
-          if rating >= 2.5:
-            self.ratings[movie_index, user_index] = 1
-          elif rating > 0:
-            self.ratings[movie_index, user_index] = -1
-
+      negative_coordinates_row, negative_coordinates_col = np.where(self.ratings > 0)
+      positive_coordinates_row, positive_coordinates_col = np.where(self.ratings >= 2.5)
+      print(negative_coordinates_col)
+      for x in range(len(negative_coordinates_row)):
+        self.ratings[negative_coordinates_row[x], negative_coordinates_col[x]] = -1
+      for x in range(len(positive_coordinates_row)):
+        self.ratings[positive_coordinates_row[x], positive_coordinates_col[x]] = 1
 
     def distance(self, u, v):
       """Calculates a given distance function between vectors u and v"""
@@ -274,7 +310,7 @@ class Chatbot:
       prefix_list = [0 for x in range(len(words))]
       while currentWordIndex < len(words):
         currentWord = words[currentWordIndex]
-        if currentWord in mySet:
+        if currentWord in mySet or currentWord[-3:] == "n't":
           for currentPrefixIndex in range(currentWordIndex+1, len(words)):
             if words[currentPrefixIndex] in self.punctuation or words[currentPrefixIndex] in mySet:
               break
