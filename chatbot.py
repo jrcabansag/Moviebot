@@ -23,12 +23,15 @@ from PorterStemmer import PorterStemmer
 
 """ TO-DO:
 
+COMPLETED FEATURES:
+- alternate titles
+- not binarizing (maybe)
+
 FEATURES:
-- handle without year
+- figure out how to choose to not binarize (turbo?? wtF??)
 - arbitrary input
 - multiple movies
 - disambiguating movie titles for series
-- non binarized data
 - emotion detection
 - spellcheck (edit distance)
 - extreme like/dislike
@@ -94,7 +97,13 @@ class Chatbot:
     def handle_prefixes(self, movie_name, prefix_list):
       for prefix_index in range(len(prefix_list)):
         prefix = prefix_list[prefix_index]
-        if movie_name[0:len(prefix)+1] == prefix+" ":
+        year_patt = '\(\d\d\d\d\)$'
+        matches = re.findall(year_patt, movie_name)
+        #print("Matches for {} is {}".format(movie_name, matches))
+        if len(matches) == 0 and movie_name[0:len(prefix)+1] == prefix+" ":
+          movie_name = movie_name[len(prefix)+1:]+", "+prefix
+          return movie_name
+        elif movie_name[0:len(prefix)+1] == prefix+" ":
           movie_year = movie_name[len(movie_name)-7:]
           movie_name = movie_name[len(prefix)+1:-7]+", "+prefix+movie_year
           return movie_name
@@ -118,12 +127,12 @@ class Chatbot:
       else:
         movie_name = matches[0]
         movie_name = self.handle_prefixes(movie_name, ["The", "A", "La", "El"])
-        # if movie_name[0:3] == "The":
-        #   movie_year = movie_name[len(movie_name)-7:]
-        #   movie_name = movie_name[4:-7]+", The"+movie_year
+        print("SEARCHING FOR {}".format(movie_name))
         if movie_name not in self.movie_to_index_dict:
-          if self.remove_year(movie_name) in self.alternate_titles_dict:
-            movie_name = self.alternate_titles_dict[self.remove_year(movie_name)]
+          if self.is_turbo and movie_name.lower() in self.alternate_titles_dict:
+            movie_name =  self.alternate_titles_dict[movie_name.lower()]
+          elif self.is_turbo and self.remove_year(movie_name).lower() in self.alternate_titles_dict:
+            movie_name = self.alternate_titles_dict[self.remove_year(movie_name).lower()]
           else:
             movie_name = ""
             response = "That is not a valid movie!"
@@ -153,7 +162,6 @@ class Chatbot:
       # calling other functions. Although modular code is not graded, it is       #
       # highly recommended                                                        #
       #############################################################################
-
       response = ""
       if len(self.movies) == 5:
         if self.check_if_yes(input):
@@ -241,14 +249,15 @@ class Chatbot:
       for movie_index in range(len(self.titles)):
         movie_title = self.titles[movie_index][0]
         movie_patt = '\((.*?)\)'
-        #print(movie_title)
         matches = re.findall(movie_patt, movie_title)
-        #print(matches)
         for match_index in range(len(matches)-1):
           match = matches[match_index]
           if match[0:6] == "a.k.a.":
             match = match[7:]
-          self.alternate_titles_dict[match] = movie_title
+          self.alternate_titles_dict[match.lower()] = movie_title
+        self.alternate_titles_dict[self.remove_year(movie_title).lower()] = movie_title
+        self.alternate_titles_dict[movie_title.lower()] = movie_title
+
 
     def make_movie_to_index_dict(self):
       for movie_index in range(len(self.titles)):
@@ -284,6 +293,27 @@ class Chatbot:
       else:
         return dot_product/(np.linalg.norm(u)*np.linalg.norm(v))
 
+    def pearson(self, u, v):
+      """Calculates a given distance function between vectors u and v"""
+      # TODO: Implement the distance function between vectors u and v]
+      # Note: you can also think of this as computing a similarity measure
+      u = np.copy(u)
+      v = np.copy(v)
+      u_rated = np.where(u != 0)[0]
+      #print(u_rated)
+      for u_index in u_rated:
+        #print("Rating in index {} is {}".format(u_index, u[u_index]))
+        u[u_index] = u[u_index] - np.average(u)
+        #print("Rating in index {} is now {}".format(u_index, u[u_index]))
+      v_rated = np.where(v != 0)[0]
+      for v_index in v_rated:
+        v[v_index] = v[v_index] - np.average(v)
+      dot_product = np.dot(u, v)
+      if dot_product == 0:
+        return 0
+      else:
+        return dot_product/(np.linalg.norm(u)*np.linalg.norm(v))
+
 
     def recommend(self):
       """Generates a list of movies based on the input vector u using
@@ -295,11 +325,9 @@ class Chatbot:
         score = 0
         for user_movie in self.movies:
           user_movie_index = self.movie_to_index_dict[user_movie]
-          score += self.distance(self.ratings[movie_index], self.ratings[user_movie_index])*self.movies[user_movie]
+          score += self.distance(self.ratings[movie_index], self.ratings[user_movie_index])*self.movies[user_movie]  
         movie_scores.append(score)
-
       movie_scores = np.array(movie_scores)
-
       for user_movie in self.movies:
         user_movie_index = self.movie_to_index_dict[user_movie]
         movie_scores[user_movie_index] = -sys.maxint-1
