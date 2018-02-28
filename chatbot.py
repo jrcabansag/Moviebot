@@ -25,14 +25,14 @@ from PorterStemmer import PorterStemmer
 
 COMPLETED FEATURES:
 - alternate titles
-- not binarizing (maybe)
+- not binarizing
+- movies without quotes (require caps on first word)
+- emotion detection
 
 FEATURES:
-- figure out how to choose to not binarize (turbo?? wtF??)
 - arbitrary input
 - multiple movies
 - disambiguating movie titles for series
-- emotion detection
 - spellcheck (edit distance)
 - extreme like/dislike
 """
@@ -45,6 +45,7 @@ class Chatbot:
     def __init__(self, is_turbo=False):
       self.name = 'Moviebot'
       self.is_turbo = is_turbo
+      self.is_binarized = True
       self.p = PorterStemmer()
       self.punctuation = set([",", ".","?","!",":",'"',"'","(",")"])
       self.endPunctuation = set([".","?","!",":",'"',"'","(",")"])
@@ -55,6 +56,7 @@ class Chatbot:
       self.movie_to_index_dict = {}
       self.alternate_titles_dict = {}
       self.movie_scores = []
+      self.non_binarized_matrix = {}
       self.read_data()
 
     #############################################################################
@@ -110,7 +112,62 @@ class Chatbot:
       return movie_name
 
     def remove_year(self, movie_title_with_year):
-      return movie_title_with_year[0:len(movie_title_with_year)-7]
+      year_patt = '(\(\d\d\d\d.*?\))'
+      year_matches = re.findall(year_patt, movie_title_with_year)
+      if len(year_matches) != 0:
+        return movie_title_with_year[0:len(movie_title_with_year)-len(year_matches[0])-1]
+      else:
+        return movie_title_with_year
+
+    def is_capitalized(self, word):
+      if word == "":
+        return False
+      else:
+        return word[0].isupper() or word[0].isdigit()
+
+    def find_non_quote_title(self, input):
+      year_patt = '(\(\d\d\d\d.*?\))'
+      year_matches = re.findall(year_patt, input)
+      word_array = input.split()
+      if len(year_matches) != 0:
+        #print("FOUND YEAR {}".format(year_matches[0]))
+        year_index = -1
+        for word_index in range(len(word_array)):
+          if word_array[word_index].find(year_matches[0]) != -1:
+            year_index = word_index
+            word_array[year_index] = year_matches[0]
+        for word_index in range(year_index):
+          if self.is_capitalized(word_array[word_index]):
+            temp_movie_title = " ".join(word_array[word_index:year_index]) # I liked Full Sequence (2014)
+            temp_movie_title = self.handle_prefixes(temp_movie_title, ["The", "A", "La", "El"])
+            temp_movie_title = self.process_for_alternate_dict(temp_movie_title)
+            #print("CHECKING TITLE {}".format(temp_movie_title))
+            if temp_movie_title in self.alternate_titles_dict:
+              return self.alternate_titles_dict[temp_movie_title]
+        return ""
+      else:
+        #print("DIDNT FIND YEAR")
+        for capital_word_index in range(len(word_array)):
+          if self.is_capitalized(word_array[capital_word_index]):
+            #print("CAPITALIZED WORD IS {}".format(word_array[capital_word_index]))
+            for right_word_index in range(len(word_array), capital_word_index-1, -1):
+              temp_movie_title = " ".join(word_array[capital_word_index:right_word_index+1])
+              temp_movie_title = self.handle_prefixes(temp_movie_title, ["The", "A", "La", "El"])
+              temp_movie_title = self.process_for_alternate_dict(temp_movie_title)
+              #print("CHECKING TITLE {}".format(temp_movie_title))
+              if temp_movie_title in self.alternate_titles_dict:
+                return self.alternate_titles_dict[temp_movie_title]
+        return ""
+
+    def process_for_alternate_dict(self, input):
+      for char in ".!?,":
+        input = input.replace(char, "")
+      return input.lower()
+
+    def remove_punctuation(self, input):
+      for char in ".!?,":
+        input = input.replace(char, "")
+      return input
 
     def extract_movie(self, input):
       movie_patt = '\"(.*?)\"'
@@ -119,7 +176,12 @@ class Chatbot:
       response = ""
       processed_sentence = input
       if len(matches) == 0:
-        response = "Sorry, I don't understand. Tell me about a movie that you have seen. (Put movie names in quotation marks)"
+        if self.is_turbo == False:
+          response = "Tell me about a movie that you have seen. (Put movie names in quotation marks)"
+        else:
+          movie_name = self.find_non_quote_title(input)
+          if movie_name == "":
+            response = "Tell me about a movie that you have seen."
       elif len(matches) >= 2:
         response = "Please tell me about one movie at a time. Go ahead."
       elif matches[0] == "":
@@ -127,12 +189,13 @@ class Chatbot:
       else:
         movie_name = matches[0]
         movie_name = self.handle_prefixes(movie_name, ["The", "A", "La", "El"])
-        print("SEARCHING FOR {}".format(movie_name))
+        #print("SEARCHING FOR {}".format(movie_name))
         if movie_name not in self.movie_to_index_dict:
-          if self.is_turbo and movie_name.lower() in self.alternate_titles_dict:
-            movie_name =  self.alternate_titles_dict[movie_name.lower()]
-          elif self.is_turbo and self.remove_year(movie_name).lower() in self.alternate_titles_dict:
-            movie_name = self.alternate_titles_dict[self.remove_year(movie_name).lower()]
+          movie_name = self.process_for_alternate_dict(movie_name)
+          if self.is_turbo and movie_name in self.alternate_titles_dict:
+            movie_name =  self.alternate_titles_dict[movie_name]
+          elif self.is_turbo and self.remove_year(movie_name) in self.alternate_titles_dict:
+            movie_name = self.alternate_titles_dict[self.remove_year(movie_name)]
           else:
             movie_name = ""
             response = "That is not a valid movie!"
@@ -151,6 +214,38 @@ class Chatbot:
     def check_if_yes(self, input):
       return input == "Yes"
 
+    def find_emotion(self, input):
+      feeling_contexts = ["I am", "I'm", "feel", "me", "felt", "I was", "You are", "This is", "Feeling"]
+      amplifiers = ["so", "very", "really", "extremely", ""]
+      adjectives_set = ["depressed", "sad", "angry", "furious", "happy", "annoyed", "frustrated", "bored", "confused", "excited", "overjoyed", "amazed", "inspired", "mad", "tired", "hungry", "glad"]
+      verbs_set = ["cry", "laugh"]
+      exclamation = ""
+      if input[-1] == "!":
+        exclamation = "really "
+      for feeling_index in range(len(feeling_contexts)):
+        for amplifier_index in range(len(amplifiers)):
+          feelings_matches = re.findall(feeling_contexts[feeling_index].lower()+" (?:"+amplifiers[amplifier_index]+" ?)+ ?(\w*) ?", input.lower())
+          for feelings_match_index in range(len(feelings_matches)):
+            if amplifier_index != len(amplifiers)-1:
+              exclamation = "really "
+            for adjectives_index in range(len(adjectives_set)):
+              stemmed_feeling = self.p.stem(feelings_matches[feelings_match_index])
+              if stemmed_feeling == self.p.stem(adjectives_set[adjectives_index]):
+                if self.sentiment[stemmed_feeling] == "pos":
+                  return "Glad to hear you're feeling "+exclamation+adjectives_set[adjectives_index]+". "
+                else:
+                  return "Sorry to hear you're feeling "+exclamation+adjectives_set[adjectives_index]+". "
+            for verbs_index in range(len(verbs_set)):
+              stemmed_feeling = self.p.stem(feelings_matches[feelings_match_index])
+              if stemmed_feeling == self.p.stem(verbs_set[verbs_index]):
+                if self.sentiment[stemmed_feeling] == "pos":
+                  return "Well, it's good to "+verbs_set[verbs_index]+" :) "
+                else:
+                  return "Sorry to hear that, it's good to "+verbs_set[verbs_index]+" once in a while. "
+      return ""
+
+
+
     def process(self, input):
       """Takes the input string from the REPL and call delegated functions
       that
@@ -162,36 +257,45 @@ class Chatbot:
       # calling other functions. Although modular code is not graded, it is       #
       # highly recommended                                                        #
       #############################################################################
+      if self.is_turbo == True and self.is_binarized == True:
+        #print("NOT BINARIZING MATRIX")
+        self.is_binarized = False
+        self.ratings = self.non_binarized_matrix
       response = ""
+      if self.is_turbo == True:
+        response = self.find_emotion(input)
+        #print("FIND EMOTION RETURNED {}".format(response))
       if len(self.movies) == 5:
         if self.check_if_yes(input):
           return "I recommend "+self.get_top_recommendation()+"\n Would you like to hear another recommendation? (Or enter :quit if you're done.)"
         elif input == ":quit":
           return ""
         else:
-          return "Sorry, I don't understand, type Yes if you would like to hear another recommendation? (Or enter :quit if you're done.)"
+          return "Sorry, I don't understand, type Yes if you would like to hear another recommendation (Or enter :quit if you're done.)"
       else:
-        movie_name, response, processed_sentence = self.extract_movie(input)
-        if movie_name == "":
-          return response
+        movie_name, temp_response, processed_sentence = self.extract_movie(input)
+        if movie_name == "" and response == "":
+          return response+"Sorry, I don't understand. "+temp_response
+        elif movie_name == "" and response != "":
+          return response+temp_response
         sentiment = self.get_sentence_sentiment(processed_sentence)
         if sentiment != 0:
           self.movies[movie_name] = sentiment
           if sentiment == 1:
             like_greeting_one = ["Glad to hear you liked "+movie_name, "Happy to hear you enjoyed "+movie_name, "You liked "+movie_name, movie_name+" sounds like a great movie"]
             like_greeting_two = [". Thanks! ", ". Thank you! ", ". Neato! ", ". Sounds cool! "]
-            response = like_greeting_one[random.randrange(len(like_greeting_one))]+like_greeting_two[random.randrange(len(like_greeting_two))]
+            response += like_greeting_one[random.randrange(len(like_greeting_one))]+like_greeting_two[random.randrange(len(like_greeting_two))]
           else:
             dislike_greeting_one = ["Sorry you didn't like "+movie_name, "You didn't like "+movie_name, "So you didn't enjoy "+movie_name, "So "+movie_name+" wasn't the best movie in your opinion"]
             dislike_greeting_two = [". Thanks for letting me know! ", ". Thanks! ", ". I understand. ", ". Alright. "]
-            response = dislike_greeting_one[random.randrange(len(dislike_greeting_one))]+dislike_greeting_two[random.randrange(len(dislike_greeting_two))]
+            response += dislike_greeting_one[random.randrange(len(dislike_greeting_one))]+dislike_greeting_two[random.randrange(len(dislike_greeting_two))]
           if len(self.movies) == 5:
             self.movie_scores = self.recommend()
             response += "I recommend "+self.get_top_recommendation()+"\n Would you like to hear another recommendation? (Or enter :quit if you're done.)"
           else:
             response += "\nTell me about another movie you have seen."
         else:
-          return "Sorry, I don't understand: "+input+". Did you like or dislike this movie?"
+          return "Sorry, I don't understand. Did you like or dislike this movie?"
         return response
 
     def get_top_recommendation(self):
@@ -201,6 +305,7 @@ class Chatbot:
 
 
     def get_sentence_sentiment(self, sentence):
+      sentence = self.remove_punctuation(sentence)
       sentence = sentence.split()
       not_flags = self.flagWords(sentence, self.negateWords)
       not_prev_flags = self.flagWordsBackwards(sentence, self.prevNegateWords)
@@ -239,24 +344,35 @@ class Chatbot:
       # movie i by user j
       self.titles, self.ratings = ratings()
       self.make_alternate_titles_dict()
+      #print(self.alternate_titles_dict)
       reader = csv.reader(open('data/sentiment.txt', 'rb'))
       self.sentiment = dict(reader)
       self.stem_words()
+      self.non_binarized_matrix = np.copy(self.ratings)
       self.binarize()
       self.make_movie_to_index_dict()
 
-    def make_alternate_titles_dict(self):
+    def make_alternate_titles_dict(self): #a.k.a without the year, anything in parenthesis without the year, full movie title without the year, movie title itself
       for movie_index in range(len(self.titles)):
         movie_title = self.titles[movie_index][0]
         movie_patt = '\((.*?)\)'
+        year_patt = '(\(\d\d\d\d.*?\))'
+        year_matches = re.findall(year_patt, movie_title)
+        if len(year_matches) == 0:
+          year = ""
+        else:
+          year = year_matches[0]
         matches = re.findall(movie_patt, movie_title)
         for match_index in range(len(matches)-1):
           match = matches[match_index]
           if match[0:6] == "a.k.a.":
             match = match[7:]
-          self.alternate_titles_dict[match.lower()] = movie_title
-        self.alternate_titles_dict[self.remove_year(movie_title).lower()] = movie_title
-        self.alternate_titles_dict[movie_title.lower()] = movie_title
+          match = self.process_for_alternate_dict(match)
+          self.alternate_titles_dict[match] = movie_title
+          self.alternate_titles_dict[match+" "+year] = movie_title
+        temp_movie_title = self.process_for_alternate_dict(movie_title)
+        self.alternate_titles_dict[self.remove_year(temp_movie_title)] = movie_title
+        self.alternate_titles_dict[temp_movie_title] = movie_title
 
 
     def make_movie_to_index_dict(self):
