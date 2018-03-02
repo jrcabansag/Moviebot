@@ -28,13 +28,13 @@ COMPLETED FEATURES:
 - not binarizing
 - movies without quotes (require caps on first word)
 - emotion detection
+- extreme like/dislike
+- arbitrary input
 
 FEATURES:
-- arbitrary input
 - multiple movies
 - disambiguating movie titles for series
 - spellcheck (edit distance)
-- extreme like/dislike
 """
 class Chatbot:
     """Simple class to implement the chatbot for PA 6."""
@@ -130,7 +130,6 @@ class Chatbot:
       year_matches = re.findall(year_patt, input)
       word_array = input.split()
       if len(year_matches) != 0:
-        #print("FOUND YEAR {}".format(year_matches[0]))
         year_index = -1
         for word_index in range(len(word_array)):
           if word_array[word_index].find(year_matches[0]) != -1:
@@ -143,8 +142,8 @@ class Chatbot:
             temp_movie_title = self.process_for_alternate_dict(temp_movie_title)
             #print("CHECKING TITLE {}".format(temp_movie_title))
             if temp_movie_title in self.alternate_titles_dict:
-              return self.alternate_titles_dict[temp_movie_title]
-        return ""
+              return temp_movie_title, self.alternate_titles_dict[temp_movie_title]
+        return "", ""
       else:
         #print("DIDNT FIND YEAR")
         for capital_word_index in range(len(word_array)):
@@ -156,8 +155,8 @@ class Chatbot:
               temp_movie_title = self.process_for_alternate_dict(temp_movie_title)
               #print("CHECKING TITLE {}".format(temp_movie_title))
               if temp_movie_title in self.alternate_titles_dict:
-                return self.alternate_titles_dict[temp_movie_title]
-        return ""
+                return temp_movie_title, self.alternate_titles_dict[temp_movie_title]
+        return "", ""
 
     def process_for_alternate_dict(self, input):
       for char in ".!?,":
@@ -169,17 +168,60 @@ class Chatbot:
         input = input.replace(char, "")
       return input
 
+    def find_in_input(self, input, input_list, response_list):
+      input = input.lower()
+      for index in range(len(input_list)):
+        matches = re.findall("(?:\W|^)"+input_list[index]+"(?:\W|$)", input)
+        if len(matches) != 0:
+          return response_list[random.randrange(0, len(response_list))]+" "
+      return ""
+
+    def find_regex_in_input(self, input, input_list, response_list):
+      input = input.lower()
+      for index in range(len(input_list)):
+        matches = re.findall("(?:\W|^)"+input_list[index], input)
+        if len(matches) != 0:
+          return response_list[random.randrange(0, len(response_list))]+matches[0]+". "
+      return ""
+
+    def check_if_arbitrary(self, input):
+      response = ""
+      hi_inputs = ["hello", "hi", "sup", "hey"]
+      hi_responses = ["Hello!", "Hi!", "Sup!", "Hey!"]
+      identity_inputs = ["who are you", "what are you", "your name"]
+      identity_responses = ["I'm "+self.name+"!", self.name+" is my name, recommending movies is my game."]
+      how_are_you_inputs = ["how are you", "what's up", "how's it going", "how's your"]
+      how_are_you_responses = ["I'm doing good!", "I'm great!", "Things could be better."]
+      topic_inputs = ["i want to", "let's", "can we", "can you"]
+      topic_input_suffix = "(.*?)(?:\.|$|,|!|because|cause)"
+      topic_inputs = [x+topic_input_suffix for x in topic_inputs]
+      topic_responses = ["I don't really want to", "Let's not"]
+      existential_question = ["what's your", "do you have a", "do you think about"]
+      talk_about_movies_responses = ["Let's talk about movies! ", "We should discuss movies! ", "Tell me about a movie you saw! "]
+      response += self.find_in_input(input, hi_inputs, hi_responses)
+      response += self.find_in_input(input, identity_inputs, identity_responses)
+      response += self.find_in_input(input, how_are_you_inputs, how_are_you_responses)
+      regex_reponse = self.find_regex_in_input(input, topic_inputs, topic_responses)
+      if regex_reponse != "":
+        regex_reponse += talk_about_movies_responses[random.randrange(0, len(talk_about_movies_responses))]
+      response += regex_reponse
+
+
+      return response
+
+
     def extract_movie(self, input):
       movie_patt = '\"(.*?)\"'
       matches = re.findall(movie_patt, input)
       movie_name = ""
       response = ""
-      processed_sentence = input
+      processed_sentence = input.lower()
       if len(matches) == 0:
         if self.is_turbo == False:
           response = "Tell me about a movie that you have seen. (Put movie names in quotation marks)"
         else:
-          movie_name = self.find_non_quote_title(input)
+          temp_movie_name, movie_name = self.find_non_quote_title(input)
+          processed_sentence = processed_sentence.replace(temp_movie_name, "")
           if movie_name == "":
             response = "Tell me about a movie that you have seen."
       elif len(matches) >= 2:
@@ -199,10 +241,11 @@ class Chatbot:
           else:
             movie_name = ""
             response = "That is not a valid movie!"
+        processed_sentence = self.remove_movie(input.lower())
         if movie_name in self.movies:
           movie_name = ""
           response = "You already talked about that movie! Tell me about other movies."
-        processed_sentence = self.remove_movie(input)
+        #processed_sentence = self.remove_movie(input)
 
 
       return movie_name, response, processed_sentence
@@ -212,11 +255,16 @@ class Chatbot:
       return input_array[0]+input_array[-1]
 
     def check_if_yes(self, input):
-      return input == "Yes"
+      yes_list = ["yes", "y", "yeah", "sure", "ok", "okay", "k"]
+      for index in range(len(yes_list)):
+        yes_matches = re.findall("(?:\W|^)"+yes_list[index]+"(?:\W|$)", input.lower())
+        if len(yes_matches) != 0:
+          return True
+      return False
 
     def find_emotion(self, input):
       feeling_contexts = ["I am", "I'm", "feel", "me", "felt", "I was", "You are", "This is", "Feeling"]
-      amplifiers = ["so", "very", "really", "extremely", ""]
+      amplifiers = ["so", "very", "really", "extremely", "super", ""]
       adjectives_set = ["depressed", "sad", "angry", "furious", "happy", "annoyed", "frustrated", "bored", "confused", "excited", "overjoyed", "amazed", "inspired", "mad", "tired", "hungry", "glad"]
       verbs_set = ["cry", "laugh"]
       exclamation = ""
@@ -244,7 +292,17 @@ class Chatbot:
                   return "Sorry to hear that, it's good to "+verbs_set[verbs_index]+" once in a while. "
       return ""
 
-
+    def has_fine_grained_sentiment(self, input):
+      input = input.replace("didn't really like", "didn't like")
+      input = input.replace("wasn't really", "wasn't")
+      input = input.replace("wasn't very", "wasn't")
+      input = input.replace("wasn't super", "wasn't")
+      trigger_words = ["love", "hate", "amazing", "terrible", "really", "very", "super", "horrible", "excellent", "!", "favorite", "best", "worst"]
+      for word_index in range(len(trigger_words)):
+        trigger_matches = re.findall(trigger_words[word_index], input.lower())
+        if len(trigger_matches) != 0:
+          return True
+      return False
 
     def process(self, input):
       """Takes the input string from the REPL and call delegated functions
@@ -274,19 +332,30 @@ class Chatbot:
           return "Sorry, I don't understand, type Yes if you would like to hear another recommendation (Or enter :quit if you're done.)"
       else:
         movie_name, temp_response, processed_sentence = self.extract_movie(input)
-        if movie_name == "" and response == "":
-          return response+"Sorry, I don't understand. "+temp_response
+        if movie_name == "" and self.is_turbo == False:
+          return "Sorry I don't understand, let's talk about movies!"
+        elif movie_name == "" and self.is_turbo == True:
+          arbitrary_response = self.check_if_arbitrary(input)
+          if arbitrary_response == "" and response == "":
+            return response+"Sorry, I don't understand. "+temp_response
+          else:
+            return response+arbitrary_response
         elif movie_name == "" and response != "":
           return response+temp_response
+        #print(processed_sentence)
         sentiment = self.get_sentence_sentiment(processed_sentence)
+        has_fine_grained_sentiment = self.has_fine_grained_sentiment(processed_sentence)
+        fine_grained_sentiment = ""
+        if has_fine_grained_sentiment == True and self.is_turbo:
+          fine_grained_sentiment = "REALLY "
         if sentiment != 0:
           self.movies[movie_name] = sentiment
           if sentiment == 1:
-            like_greeting_one = ["Glad to hear you liked "+movie_name, "Happy to hear you enjoyed "+movie_name, "You liked "+movie_name, movie_name+" sounds like a great movie"]
+            like_greeting_one = ["Glad to hear you "+fine_grained_sentiment+"liked "+movie_name, "Happy to hear you "+fine_grained_sentiment+"enjoyed "+movie_name, "You "+fine_grained_sentiment+"liked "+movie_name, movie_name+" sounds like "+fine_grained_sentiment+"a great movie"]
             like_greeting_two = [". Thanks! ", ". Thank you! ", ". Neato! ", ". Sounds cool! "]
             response += like_greeting_one[random.randrange(len(like_greeting_one))]+like_greeting_two[random.randrange(len(like_greeting_two))]
           else:
-            dislike_greeting_one = ["Sorry you didn't like "+movie_name, "You didn't like "+movie_name, "So you didn't enjoy "+movie_name, "So "+movie_name+" wasn't the best movie in your opinion"]
+            dislike_greeting_one = ["Sorry you "+fine_grained_sentiment+"didn't like "+movie_name, "You "+fine_grained_sentiment+"didn't like "+movie_name, "So you "+fine_grained_sentiment+"didn't enjoy "+movie_name, "So "+movie_name+" "+fine_grained_sentiment+"wasn't the best movie in your opinion"]
             dislike_greeting_two = [". Thanks for letting me know! ", ". Thanks! ", ". I understand. ", ". Alright. "]
             response += dislike_greeting_one[random.randrange(len(dislike_greeting_one))]+dislike_greeting_two[random.randrange(len(dislike_greeting_two))]
           if len(self.movies) == 5:
@@ -393,7 +462,7 @@ class Chatbot:
       """Modifies the ratings matrix to make all of the ratings binary"""
       negative_coordinates_row, negative_coordinates_col = np.where(self.ratings > 0)
       positive_coordinates_row, positive_coordinates_col = np.where(self.ratings >= 2.5)
-      print(negative_coordinates_col)
+      #print(negative_coordinates_col)
       for x in range(len(negative_coordinates_row)):
         self.ratings[negative_coordinates_row[x], negative_coordinates_col[x]] = -1
       for x in range(len(positive_coordinates_row)):
@@ -492,10 +561,13 @@ class Chatbot:
     #############################################################################
     def intro(self):
       return """
-      Your task is to implement the chatbot as detailed in the PA6 instructions.
-      Remember: in the starter mode, movie names will come in quotation marks and
-      expressions of sentiment will be simple!
-      Write here the description for your own chatbot!
+      Turbo Moviebot loves talking about movies! He can:
+      - identify movies without quotation marks or perfect capitalization
+      - understand fine-grained sentiment extraction
+      - identify and respond to emotions
+      - respond to arbitrary input
+      - use a non binarized dataset
+      - understand alternate/foreign titles.
       """
 
 
